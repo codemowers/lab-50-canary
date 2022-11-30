@@ -1,0 +1,119 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hello-production
+spec:
+  revisionHistoryLimit: 0
+  replicas: 2
+  selector:
+    matchLabels: &selectorLabels
+      app.kubernetes.io/name: hello-production
+  template:
+    metadata:
+      labels: *selectorLabels
+    spec:
+      containers:
+        - name: hello
+          image: hashicorp/http-echo
+          command:
+            - /http-echo
+            - -text=hello production
+          ports:
+            - name: http
+              containerPort: 5678
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hello-canary
+spec:
+  revisionHistoryLimit: 0
+  replicas: 2
+  selector:
+    matchLabels: &selectorLabels
+      app.kubernetes.io/name: hello-canary
+  template:
+    metadata:
+      labels: *selectorLabels
+    spec:
+      containers:
+        - name: hello
+          image: hashicorp/http-echo
+          command:
+            - /http-echo
+            - -text=hello canary
+          ports:
+            - name: http
+              containerPort: 5678
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hello-production
+  labels:
+    app.kubernetes.io/name: hello-production
+spec:
+  selector:
+    app.kubernetes.io/name: hello-production
+  ports:
+    - protocol: TCP
+      port: 5678
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hello-canary
+  labels:
+    app.kubernetes.io/name: hello-canary
+spec:
+  selector:
+    app.kubernetes.io/name: hello-canary
+  ports:
+    - protocol: TCP
+      port: 5678
+---
+apiVersion: traefik.containo.us/v1alpha1
+kind: TraefikService
+metadata:
+  name: hello
+  annotations:
+    kubernetes.io/ingress.class: shared
+spec:
+  weighted:
+    services:
+      - name: hello-production
+        weight: 3
+        port: 5678
+      - name: hello-canary
+        weight: 1
+        port: 5678
+---
+apiVersion: traefik.containo.us/v1alpha1
+kind: IngressRoute
+metadata:
+  name: hello
+  annotations:
+    kubernetes.io/ingress.class: shared
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`canary-laurivosandi.codemowers.ee`) && PathPrefix(`/`)
+      kind: Rule
+      services:
+        - name: hello
+          kind: TraefikService
+---
+apiVersion: externaldns.k8s.io/v1alpha1
+kind: DNSEndpoint
+metadata:
+  name: hello
+spec:
+  endpoints:
+    - dnsName: canary-laurivosandi.codemowers.ee
+      recordType: CNAME
+      targets:
+        - traefik.codemowers.ee
